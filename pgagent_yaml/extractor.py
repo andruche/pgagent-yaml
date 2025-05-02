@@ -2,22 +2,23 @@ import argparse
 import os
 import sys
 
-import yaml
-
+from .formatter import Formatter
 from .pg import Pg
 
 
 def without(_dict, _key):
     _dict = dict(_dict)
     if isinstance(_key, str):
-        del _dict[_key]
+        if _key in _dict:
+            del _dict[_key]
     else:
         for __key in _key:
-            del _dict[__key]
+            if __key in _dict:
+                del _dict[__key]
     return _dict
 
 
-def compact_flags(flags, aliases):
+def collapse_flags(flags, aliases):
     if all(flags):
         return '*'
     if not any(flags):
@@ -43,32 +44,30 @@ class Extractor:
     def __init__(self, args: argparse.Namespace, pg: Pg):
         self.args = args
         self.pg = pg
-
-        def str_presenter(dumper, data):
-            if '\n' in data:
-                return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
-            return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-        yaml.add_representer(str, str_presenter)
+        self.formatter = Formatter()
+        self.job_classes = {}
 
     async def export(self):
         jobs = await self.get_jobs()
-        for job in jobs:
-            file_name = os.path.join(self.args.out_dir, f"{job['name']}.yaml")
-            with open(file_name, 'w') as file:
-                yaml.dump(
-                    {job.pop('name'): job},
-                    file,
-                    allow_unicode=True,
-                    sort_keys=False,
-                    width=float('inf')
-                )
+        for job_name, job in jobs.items():
+            file_name = os.path.join(self.args.out_dir, f"{job_name}.yaml")
+            self.formatter.dump({job_name: job}, file_name)
 
-    async def get_jobs(self) -> list[dict]:
+    async def get_jobs(self) -> dict:
+        self.job_classes = {
+            jclass['id']: jclass['name']
+            for jclass in await self._get_job_classes_data()
+        }
         jobs = await self._get_jobs_data()
         steps = await self._get_steps_data()
         schedules = await self._get_schedules_data()
         jobs = {
-            job['id']: dict(without(job, 'id'), schedules={}, steps={})
+            job['id']: dict(
+                **{'class': self.job_classes[job['class_id']]},
+                **without(job, ('id', 'class_id')),
+                schedules={},
+                steps={},
+            )
             for job in jobs
         }
         await self.check_schedule_start_end(jobs, schedules)
@@ -80,15 +79,26 @@ class Extractor:
             jobs[schedule['job_id']]['schedules'][schedule['name']] = without(schedule, del_keys)
         for step in steps:
             jobs[step['job_id']]['steps'][step['name']] = without(step, ('job_id', 'name'))
-        return list(jobs.values())
+        return {
+            job.pop('name'): job
+            for job in jobs.values()
+        }
+
+    async def _get_job_classes_data(self):
+        return await self.pg.fetch('''
+            select jclid as id,
+                   jclname as name
+              from pgagent.pga_jobclass
+        ''')
 
     async def _get_jobs_data(self):
         return await self.pg.fetch('''
             select jobid as id,
+                   jobjclid as class_id,
                    jobname as name,
                    jobenabled as enabled,
                    jobdesc as description
-              from pgagent.pga_job;
+              from pgagent.pga_job j
         ''')
 
     async def _get_steps_data(self):
@@ -117,11 +127,11 @@ class Extractor:
         return [
             dict(
                 schedule,
-                minutes=compact_flags(schedule['minutes'], range(60)),
-                hours=compact_flags(schedule['hours'], range(24)),
-                monthdays=compact_flags(schedule['monthdays'], range(1, 32)),
-                months=compact_flags(schedule['months'], range(1, 13)),
-                weekdays=compact_flags(schedule['weekdays'], [
+                minutes=collapse_flags(schedule['minutes'], range(60)),
+                hours=collapse_flags(schedule['hours'], range(24)),
+                monthdays=collapse_flags(schedule['monthdays'], list(range(1, 32)) + ['last day']),
+                months=collapse_flags(schedule['months'], range(1, 13)),
+                weekdays=collapse_flags(schedule['weekdays'], [
                     'sunday',
                     'monday',
                     'tuesday',

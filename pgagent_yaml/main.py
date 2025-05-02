@@ -4,6 +4,7 @@ import asyncio
 import shutil
 
 from .extractor import Extractor
+from .synchronizer import Synchronizer
 from .pg import Pg
 from . import __version__
 
@@ -15,6 +16,11 @@ async def run(args):
         pg = Pg(args)
         await pg.init()
         await Extractor(args, pg).export()
+
+    elif args.command == 'sync':
+        pg = Pg(args)
+        await pg.init()
+        await Synchronizer(args, pg).sync()
 
     else:
         raise Exception(f'unknown command {args.command}')
@@ -55,7 +61,6 @@ def main():
         conflict_handler='resolve',
     )
     add_connection_args(parser_export)
-
     parser_export.add_argument(
         '--out-dir',
         required=True,
@@ -78,6 +83,38 @@ def main():
         help='include "start", "end" fields (without by default)'
     )
 
+    parser_sync = subparsers.add_parser(
+        'sync',
+        help='sync files to pgagent jobs',
+        conflict_handler='resolve',
+    )
+    add_connection_args(parser_sync)
+    parser_sync.add_argument(
+        '--source',
+        required=True,
+        help='directory or file with jobs to sync to pgagent'
+    )
+    parser_sync.add_argument(
+        '--dry-run',
+        action="store_true",
+        help='test run without real changes'
+    )
+    parser_sync.add_argument(
+        '--echo-queries',
+        action="store_true",
+        help='echo commands sent to server'
+    )
+    parser_sync.add_argument(
+        '-y', '--yes',
+        action="store_true",
+        help='do not ask confirm'
+    )
+    parser_sync.add_argument(
+        '--ignore-version',
+        action="store_true",
+        help='try exporting an unsupported server version'
+    )
+
     args = arg_parser.parse_args()
 
     if args.command == 'export':
@@ -91,6 +128,10 @@ def main():
             os.makedirs(args.out_dir, exist_ok=True)
         except Exception:
             arg_parser.error("can not access to directory '%s'" % args.out_dir)
+
+    if args.command == 'sync':
+        if not os.path.exists(args.source):
+            parser_export.error(f'file or directory not found: {args.source}')
 
     if os.name == 'nt':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

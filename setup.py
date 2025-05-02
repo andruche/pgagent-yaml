@@ -38,6 +38,7 @@ setup_requires = []
 
 install_requires = [
     'asyncpg>=0.27.0,<0.31.0',
+    'pyyaml',
 ]
 
 tests_require = [

@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 import asyncpg
 
 
@@ -28,6 +30,11 @@ class Pg:
 
     async def execute(self, query: str, **params) -> None:
         await self.con.execute(query, *params)
+
+    @asynccontextmanager
+    async def transaction(self) -> asyncpg.Connection:
+        async with self.con.transaction():
+            yield self.con
 
     async def get_pgagent_version(self) -> tuple[int, int]:
         ver = await self.fetch('''
