@@ -32,8 +32,30 @@ options:
                         include "start", "end" fields (without by default)
 ```
 
+### sync jobs:
+```
+usage: pgagent_yaml sync [--help] [-d DBNAME] [-h HOST] [-p PORT] [-U USER] [-W PASSWORD] --source SOURCE [--dry-run]
+                         [--echo-queries] [-y] [--ignore-version]
+
+options:
+  --help                show this help message and exit
+  -d DBNAME, --dbname DBNAME
+                        database name to connect to
+  -h HOST, --host HOST  database server host or socket directory
+  -p PORT, --port PORT  database server port
+  -U USER, --user USER  database user name
+  -W PASSWORD, --password PASSWORD
+                        database user password
+  --source SOURCE       directory or file with jobs to sync to pgagent
+  --dry-run             test run without real changes
+  --echo-queries        echo commands sent to server
+  -y, --yes             do not ask confirm
+  --ignore-version      try exporting an unsupported server version
+```
+
 ## examples
 
 ```
-pg_export -d my_database -h 127.0.0.1 -p 5432 -U postgres --out-dir /tmp/jobs/
+$ pgagent_yaml export -d my_database -h 127.0.0.1 -p 5432 -U postgres --out-dir /tmp/jobs/
+$ pgagent_yaml sync -d my_database -h 127.0.0.1 -p 5432 -U postgres --source /tmp/jobs/
 ```
