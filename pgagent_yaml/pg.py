@@ -1,6 +1,17 @@
-from contextlib import asynccontextmanager
+import datetime
+import sys
 
 import asyncpg
+
+
+def quote_literal(value):
+    if value is None:
+        return 'null'
+    elif isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    elif isinstance(value, (int, bool)):
+        return str(value).lower()
+    raise TypeError(f'Unknown type for quote value: {value}')
 
 
 class Pg:
@@ -9,6 +20,7 @@ class Pg:
         'from': (3, 2),
         'to': (4, 2)
     }
+    now: datetime.datetime
 
     def __init__(self, args):
         self.args = args
@@ -23,6 +35,7 @@ class Pg:
             statement_cache_size=0,
         )
         await self.check_version()
+        self.now = (await self.fetch('select now()'))[0]['now']
 
     async def fetch(self, query: str, **params) -> list[dict]:
         rows = await self.con.fetch(query, *params)
@@ -30,11 +43,6 @@ class Pg:
 
     async def execute(self, query: str, **params) -> None:
         await self.con.execute(query, *params)
-
-    @asynccontextmanager
-    async def transaction(self) -> asyncpg.Connection:
-        async with self.con.transaction():
-            yield self.con
 
     async def get_pgagent_version(self) -> tuple[int, int]:
         ver = await self.fetch('''
@@ -57,5 +65,9 @@ class Pg:
         if not (ver_from <= ver <= ver_to):
             def to_str(_ver):
                 return ".".join(map(str, _ver))
-            raise Exception(f'Version {to_str(ver)} not supported (only to_str(ver_from) - {to_str(ver_to)})'
-                            f', use --ignore-version to run anyway')
+            print(
+                f'pgagent {to_str(ver)} not supported (only {to_str(ver_from)} - {to_str(ver_to)})'
+                f', use --ignore-version to run anyway',
+                file=sys.stderr
+            )
+            exit(1)

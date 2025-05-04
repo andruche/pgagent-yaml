@@ -4,185 +4,96 @@ import sys
 
 from .formatter import Formatter
 from .pg import Pg
-
-
-def without(_dict, _key):
-    _dict = dict(_dict)
-    if isinstance(_key, str):
-        if _key in _dict:
-            del _dict[_key]
-    else:
-        for __key in _key:
-            if __key in _dict:
-                del _dict[__key]
-    return _dict
-
-
-def collapse_flags(flags, aliases):
-    if all(flags):
-        return '*'
-    if not any(flags):
-        return '-'
-    return [
-        alias
-        for flag, alias in zip(flags, aliases)
-        if flag
-    ]
+from .data_mapping import PgToYamlMapping
 
 
 class Extractor:
-    on_errors = {
-        's': 'success',
-        'f': 'fail',
-        'i': 'ignore',
-    }
-    kinds = {
-        's': 'sql',
-        'b': 'batch'
-    }
-
     def __init__(self, args: argparse.Namespace, pg: Pg):
         self.args = args
         self.pg = pg
+        self.map = PgToYamlMapping(pg)
         self.formatter = Formatter()
-        self.job_classes = {}
 
-    async def export(self):
+    async def export(self) -> None:
         jobs = await self.get_jobs()
         for job_name, job in jobs.items():
             file_name = os.path.join(self.args.out_dir, f"{job_name}.yaml")
             self.formatter.dump({job_name: job}, file_name)
 
     async def get_jobs(self) -> dict:
-        self.job_classes = {
-            jclass['id']: jclass['name']
-            for jclass in await self._get_job_classes_data()
-        }
-        jobs = await self._get_jobs_data()
-        steps = await self._get_steps_data()
-        schedules = await self._get_schedules_data()
-        jobs = {
-            job['id']: dict(
-                **{'class': self.job_classes[job['class_id']]},
-                **without(job, ('id', 'class_id')),
-                schedules={},
-                steps={},
-            )
-            for job in jobs
-        }
-        await self.check_schedule_start_end(jobs, schedules)
-        if self.args.include_schedule_start_end:
-            del_keys = ('job_id', 'name')
-        else:
-            del_keys = ('job_id', 'name', 'start', 'end')
-        for schedule in schedules:
-            jobs[schedule['job_id']]['schedules'][schedule['name']] = without(schedule, del_keys)
-        for step in steps:
-            jobs[step['job_id']]['steps'][step['name']] = without(step, ('job_id', 'name'))
-        return {
-            job.pop('name'): job
-            for job in jobs.values()
-        }
+        await self.map.load_job_classes()
+        jobs = self.map.map_data(
+            await self.get_jobs_data(),
+            await self.get_schedules_data(),
+            await self.get_steps_data(),
+        )
+        if not self.args.include_schedule_start_end:
+            self.del_schedules_start_end(jobs)
+        return jobs
 
-    async def _get_job_classes_data(self):
+    async def get_jobs_data(self) -> list[dict]:
         return await self.pg.fetch('''
-            select jclid as id,
-                   jclname as name
-              from pgagent.pga_jobclass
-        ''')
-
-    async def _get_jobs_data(self):
-        return await self.pg.fetch('''
-            select jobid as id,
-                   jobjclid as class_id,
-                   jobname as name,
-                   jobenabled as enabled,
-                   jobdesc as description
+            select jobid,
+                   jobjclid,
+                   jobname,
+                   jobenabled,
+                   jobdesc
               from pgagent.pga_job j
         ''')
 
-    async def _get_steps_data(self):
-        return [
-            dict(
-                step,
-                kind=self.kinds[step['kind']],
-                on_error=self.on_errors[step['on_error']],
-            )
-            for step in await self.pg.fetch('''
-                select jstjobid as job_id,
-                       jstname as name,
-                       jstenabled as enabled,
-                       jstdesc as description,
-                       jstkind as kind,
-                       jstonerror as on_error,
-                       jstconnstr as connection_string,
-                       jstdbname as local_database,
-                       jstcode as code
-                  from pgagent.pga_jobstep
-                 order by jstname;
-            ''')
-        ]
+    async def get_steps_data(self) -> list[dict]:
+        return await self.pg.fetch('''
+            select jstjobid,
+                   jstname,
+                   jstenabled,
+                   jstdesc,
+                   jstkind,
+                   jstonerror,
+                   jstconnstr,
+                   jstdbname,
+                   jstcode
+              from pgagent.pga_jobstep
+             order by jstname;
+        ''')
 
-    async def _get_schedules_data(self):
-        return [
-            dict(
-                schedule,
-                minutes=collapse_flags(schedule['minutes'], range(60)),
-                hours=collapse_flags(schedule['hours'], range(24)),
-                monthdays=collapse_flags(schedule['monthdays'], list(range(1, 32)) + ['last day']),
-                months=collapse_flags(schedule['months'], range(1, 13)),
-                weekdays=collapse_flags(schedule['weekdays'], [
-                    'sunday',
-                    'monday',
-                    'tuesday',
-                    'wednesday',
-                    'thursday',
-                    'friday',
-                    'saturday',
-                ])
-            )
-            for schedule in await self.pg.fetch('''
-                select jscjobid as job_id,
-                       jscname as name,
-                       jscdesc as description,
-                       jscenabled as enabled,
-                       jscstart as start,
-                       jscend as end,
-                       jscminutes as minutes,
-                       jschours as hours,
-                       jscmonthdays as monthdays,
-                       jscmonths as months,
-                       jscweekdays as weekdays
-                  from pgagent.pga_schedule
-                 order by jscname;
-            ''')
-        ]
+    async def get_schedules_data(self) -> list[dict]:
+        return await self.pg.fetch('''
+            select jscjobid,
+                   jscname,
+                   jscdesc,
+                   jscenabled,
+                   jscstart,
+                   jscend,
+                   jscminutes,
+                   jschours,
+                   jscmonthdays,
+                   jscmonths,
+                   jscweekdays
+              from pgagent.pga_schedule
+             order by jscname;
+        ''')
 
-    async def check_schedule_start_end(self, jobs, schedules):
-        if self.args.include_schedule_start_end:
-            return
-
-        now = (await self.pg.fetch('select now()'))[0]['now']
+    def del_schedules_start_end(self, jobs: dict[str, dict]) -> None:
         has_warning = False
-        for schedule in schedules:
-            job_name = jobs[schedule["job_id"]]["name"]
-            schedule_name = f'{job_name}/{schedule["name"]}'
-            if schedule['start'] and schedule['start'] > now:
-                print(
-                    f'WARNING: The schedule "{schedule_name}" is inactive '
-                    f'(start="{schedule["start"]}" > now)',
-                    file=sys.stderr
-                )
-                has_warning = True
-            if schedule['end'] and schedule['end'] < now:
-                print(
-                    f'WARNING: The schedule "{schedule_name}" is inactive '
-                    f'(end="{schedule["end"]}" < now)',
-                    file=sys.stderr
-                )
-                has_warning = True
+        for job_name, job in jobs.items():
+            for schedule_name, schedule in job['schedules'].items():
+                has_warning = self.check_schedules_start_end(job_name, schedule_name, schedule) or has_warning
+                del schedule['start']
+                del schedule['end']
         if has_warning:
             print(
                 'HINT: Use --include-schedule-start-end for export schedules with "start", "end" fields',
                 file=sys.stderr
             )
+
+    def check_schedules_start_end(self, job_name: str, schedule_name: str, schedule: dict) -> bool:
+        schedule_name = f'{job_name}/{schedule_name}'
+        header = f'WARNING: The schedule "{schedule_name}" is inactive'
+        has_warning = False
+        if schedule['start'] > self.pg.now:
+            print(f'{header} (start="{schedule["start"]}" > now)', file=sys.stderr)
+            has_warning = True
+        if schedule['end'] and schedule['end'] < self.pg.now:
+            print(f'{header} (end="{schedule["end"]}" < now)', file=sys.stderr)
+            has_warning = True
+        return has_warning

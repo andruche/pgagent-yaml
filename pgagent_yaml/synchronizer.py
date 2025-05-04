@@ -5,70 +5,43 @@ import sys
 import yaml
 from pydantic import ValidationError
 
-from .extractor import Extractor, without
+from .extractor import Extractor
+from .data_mapping import YamlToPgMapping, without
 from .formatter import Formatter
 from .models.job import Job
-from .pg import Pg
+from .pg import Pg, quote_literal
 from .str_diff import color_str_diff
 
 
-def expand_flags(flags, aliases):
-    res = ",".join(
-        't' if flags != '-' and (flags == '*' or alias in flags) else 'f'
-        for alias in aliases
-    )
-    res = f'{{{res}}}'
-    return res
-
-
 class Synchronizer:
-    job_columns = {
-         'id': 'jobid',
-         'class': 'jobjclid',
-         'name': 'jobname',
-         'enabled': 'jobenabled',
-         'description': 'jobdesc',
-    }
-    step_columns = {
-        'job_id': 'jstjobid',
-        'name': 'jstname',
-        'enabled': 'jstenabled',
-        'description': 'jstdesc',
-        'kind': 'jstkind',
-        'on_error': 'jstonerror',
-        'connection_string': 'jstconnstr',
-        'local_database': 'jstdbname',
-        'code': 'jstcode',
-    }
-    schedule_columns = {
-        'job_id': 'jscjobid',
-        'name': 'jscname',
-        'description': 'jscdesc',
-        'enabled': 'jscenabled',
-        'start': 'jscstart',
-        'end': 'jscend',
-        'minutes': 'jscminutes',
-        'hours': 'jschours',
-        'monthdays': 'jscmonthdays',
-        'months': 'jscmonths',
-        'weekdays': 'jscweekdays',
-    }
-
     def __init__(self, args: argparse.Namespace, pg: Pg):
         self.args = args
         self.pg = pg
         self.extractor = Extractor(args, pg)
-        self.kinds = {
-            value: key
-            for key, value in self.extractor.kinds.items()
-        }
-        self.on_errors = {
-            value: key
-            for key, value in self.extractor.on_errors.items()
-        }
+        self.map = YamlToPgMapping(pg)
         self.formatter = Formatter()
         self.is_dir = os.path.isdir(self.args.source)
-        self.job_classes = {}
+
+    async def sync(self):
+        await self.map.load_job_classes()
+        src_jobs = self.load_jobs()
+        self.args.include_schedule_start_end = any(
+            True
+            for job_name, job in src_jobs.items()
+            if any(
+                True
+                for schedule in job['schedules']
+                if 'start' in schedule
+            )
+        )
+        dst_jobs = await self.extractor.get_jobs()
+        diff = self.get_diff(src_jobs, dst_jobs)
+        if not diff:
+            print('Nothing to do: all jobs are up to date')
+            return
+        self.print_diff(diff)
+        if self.args.yes or self.confirm(len(diff)):
+            await self.apply_changes(diff)
 
     def load_jobs(self) -> dict[str, dict]:
         jobs = {}
@@ -96,30 +69,6 @@ class Synchronizer:
             print(f'ERROR: cannot load job "{job_name}" from file: {file_name}')
             print(str(e), file=sys.stderr)
             exit(1)
-
-    async def sync(self):
-        src_jobs = self.load_jobs()
-        self.args.include_schedule_start_end = any(
-            True
-            for job_name, job in src_jobs.items()
-            if any(
-                True
-                for schedule in job['schedules']
-                if 'start' in schedule
-            )
-        )
-        dst_jobs = await self.extractor.get_jobs()
-        self.job_classes = {
-            value: key
-            for key, value in self.extractor.job_classes.items()
-        }
-        diff = self.get_diff(src_jobs, dst_jobs)
-        if not diff:
-            print('Nothing to do: all jobs are up to date')
-            return
-        self.print_diff(diff)
-        if self.args.yes or self.confirm(len(diff)):
-            await self.apply_changes(diff)
 
     def get_diff(self, src_jobs, dst_jobs):
         if self.is_dir:
@@ -158,15 +107,14 @@ class Synchronizer:
 
     async def apply_changes(self, diff):
         for job_name, src, dst in diff:
-            queries = []
-            queries.extend(self._get_apply_job_queries(job_name, src, dst))
-            queries.extend(self._get_apply_table_queries(job_name, src, dst, 'pgagent.pga_jobstep', 'steps'))
-            queries.extend(self._get_apply_table_queries(job_name, src, dst, 'pgagent.pga_schedule', 'schedules'))
-            async with self.pg.transaction() as con:
-                queries = f'--job: {job_name}\n' + '\n'.join(queries)
-                self.print_query(queries)
-                if not self.args.dry_run:
-                    await con.execute(queries)
+            queries = [f'--job: {job_name}']
+            queries.extend(self.get_apply_job_queries(job_name, src, dst))
+            queries.extend(self.get_apply_table_queries(job_name, src, dst, 'pgagent.pga_jobstep', 'steps'))
+            queries.extend(self.get_apply_table_queries(job_name, src, dst, 'pgagent.pga_schedule', 'schedules'))
+            queries = '\n'.join(queries)
+            self.print_query(queries)
+            if not self.args.dry_run:
+                await self.pg.execute(queries)
 
     def print_query(self, query):
         if not self.args.echo_queries:
@@ -174,107 +122,47 @@ class Synchronizer:
         executed = ' (not executed)' if self.args.dry_run else ''
         print(f'\033[33mQUERY{executed}: {query}\033[0m\n')
 
-    @staticmethod
-    def _quote_literal(value):
-        if value is None:
-            return 'null'
-        elif isinstance(value, str):
-            return "'" + value.replace("'", "''") + "'"
-        elif isinstance(value, (int, bool)):
-            return str(value).lower()
-        raise TypeError(f'Unknown type for quote value: {value}')
-
-    @staticmethod
-    def _get_diff_keys(src, dst):
-        return {
-            key: value
-            for key, value in src.items()
-            if value != dst[key]
-        }
-
-    def _map_column(self, table, column):
-        if table == 'pgagent.pga_job':
-            return self.job_columns[column]
-        if table == 'pgagent.pga_jobstep':
-            return self.step_columns[column]
-        if table == 'pgagent.pga_schedule':
-            return self.schedule_columns[column]
-
-    def _map_value(self, table, column, value):
-        if table == 'pgagent.pga_job':
-            if column == 'class':
-                return self.job_classes[value]
-        if table == 'pgagent.pga_jobstep':
-            if column == 'kind':
-                return self.kinds[value]
-            if column == 'on_error':
-                return self.on_errors[value]
-        if table == 'pgagent.pga_schedule':
-            if column == 'minutes':
-                return expand_flags(value, range(60))
-            if column == 'hours':
-                return expand_flags(value, range(24))
-            if column == 'monthdays':
-                return expand_flags(value, list(range(1, 32)) + ['last day'])
-            if column == 'months':
-                return expand_flags(value, range(1, 13))
-            if column == 'weekdays':
-                return expand_flags(value, [
-                    'sunday',
-                    'monday',
-                    'tuesday',
-                    'wednesday',
-                    'thursday',
-                    'friday',
-                    'saturday',
-                ])
-        return value
-
-    def _map_data(self, table, data):
-        return {
-            self._map_column(table, key): self._map_value(table, key, value)
-            for key, value in data.items()
-        }
-
     def get_job_id_by_name_query(self, job_name):
         table = 'pgagent.pga_job'
-        id_column = self._map_column(table, 'id')
-        name_column = self._map_column(table, 'name')
-        job_name = self._quote_literal(job_name)
+        id_column = self.map.map_column(table, 'id')
+        name_column = self.map.map_column(table, 'name')
+        job_name = quote_literal(job_name)
         return f'(select {id_column} from {table} where {name_column} = {job_name})'
 
     def get_job_name_filter(self, table, job_name):
         if job_name:
-            return f" and {self._map_column(table, 'job_id')} = {self.get_job_id_by_name_query(job_name)}"
+            column = self.map.map_column(table, 'job_id')
+            subquery = self.get_job_id_by_name_query(job_name)
+            return f" and {column} = {subquery}"
         return ''
 
     def get_insert_query(self, table, name, data, job_name=None):
-        data = self._map_data(table, dict(name=name, **data))
+        data = self.map.map_table_row(table, dict(name=name, **data))
         columns = ', '.join(data.keys())
-        values = ', '.join(map(self._quote_literal, data.values()))
+        values = ', '.join(map(quote_literal, data.values()))
         if job_name:
-            columns += f", {self._map_column(table, 'job_id')}"
+            columns += f", {self.map.map_column(table, 'job_id')}"
             values += f", {self.get_job_id_by_name_query(job_name)}"
         return f'insert into {table}({columns}) values ({values});'
 
     def get_update_query(self, table, name, data, job_name=None):
-        data = self._map_data(table, data)
+        data = self.map.map_table_row(table, data)
         values = ', '.join(
-            f'{key} = {self._quote_literal(value)}'
+            f'{key} = {quote_literal(value)}'
             for key, value in data.items()
         )
-        name_column = self._map_column(table, 'name')
-        name_value = self._quote_literal(name)
+        name_column = self.map.map_column(table, 'name')
+        name_value = quote_literal(name)
         job_name_filter = self.get_job_name_filter(table, job_name)
         return f'update {table} set {values} where {name_column} = {name_value}{job_name_filter};'
 
     def get_delete_query(self, table, name, job_name=None):
-        name_column = self._map_column(table, 'name')
-        name_value = self._quote_literal(name)
+        name_column = self.map.map_column(table, 'name')
+        name_value = quote_literal(name)
         job_name_filter = self.get_job_name_filter(table, job_name)
         return f'delete from {table} where {name_column} = {name_value}{job_name_filter};'
 
-    def _get_apply_job_queries(self, job_name, src, dst):
+    def get_apply_job_queries(self, job_name, src, dst):
         if src:
             src = without(src, ('schedules', 'steps'))
         if dst:
@@ -283,14 +171,14 @@ class Synchronizer:
         if src is not None and dst is None:
             return [self.get_insert_query('pgagent.pga_job', job_name, src)]
         if src is not None and dst is not None:
-            data = self._get_diff_keys(src, dst)
+            data = self.get_diff_keys(src, dst)
             if data:
                 return [self.get_update_query('pgagent.pga_job', job_name, data)]
         if src is None and dst is not None:
             return [self.get_delete_query('pgagent.pga_job', job_name, src)]
         return []
 
-    def _get_apply_table_queries(self, job_name, src, dst, table, key):
+    def get_apply_table_queries(self, job_name, src, dst, table, key):
         if src is None:
             return []
         src_items = (src or {}).get(key, {})
@@ -305,9 +193,17 @@ class Synchronizer:
             if src_item is not None and dst_item is None:
                 res.append(self.get_insert_query(table, item_name, src_item, job_name))
             if src_item is not None and dst_item is not None:
-                data = self._get_diff_keys(src_item, dst_item)
+                data = self.get_diff_keys(src_item, dst_item)
                 if data:
                     res.append(self.get_update_query(table, item_name, data, job_name))
             if src_item is None and dst_item is not None:
                 res.append(self.get_delete_query(table, item_name, job_name))
         return res
+
+    @staticmethod
+    def get_diff_keys(src, dst):
+        return {
+            key: value
+            for key, value in src.items()
+            if value != dst[key]
+        }
