@@ -1,10 +1,13 @@
 import argparse
 import os
+import sys
 
 import yaml
+from pydantic import ValidationError
 
 from .extractor import Extractor, without
 from .formatter import Formatter
+from .models.job import Job
 from .pg import Pg
 from .str_diff import color_str_diff
 
@@ -70,14 +73,29 @@ class Synchronizer:
     def load_jobs(self) -> dict[str, dict]:
         jobs = {}
         if self.is_dir:
-            file_names = os.listdir(self.args.source)
+            file_names = (
+                os.path.join(self.args.source, file_name)
+                for file_name in os.listdir(self.args.source)
+            )
         else:
             file_names = [self.args.source]
+
         for file_name in file_names:
-            job = yaml.safe_load(open(os.path.join(self.args.source, file_name)))
+            job = yaml.safe_load(open(file_name))
             job_name = next(iter(job.keys()))
-            jobs[job_name] = job[job_name]
+            job_data = job[job_name]
+            self.validate_job(file_name, job_name, job_data)
+            jobs[job_name] = job_data
         return jobs
+
+    @staticmethod
+    def validate_job(file_name, job_name, job_data):
+        try:
+            Job(**job_data)
+        except ValidationError as e:
+            print(f'ERROR: cannot load job "{job_name}" from file: {file_name}')
+            print(str(e), file=sys.stderr)
+            exit(1)
 
     async def sync(self):
         src_jobs = self.load_jobs()

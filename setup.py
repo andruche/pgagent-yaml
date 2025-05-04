@@ -37,8 +37,9 @@ class PyTest(TestCommand):
 setup_requires = []
 
 install_requires = [
-    'asyncpg>=0.27.0,<0.31.0',
+    'pydantic',
     'pyyaml',
+    'asyncpg>=0.27.0,<0.31.0',
 ]
 
 tests_require = [
