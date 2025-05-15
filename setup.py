@@ -66,6 +66,7 @@ setup(
     version=PACKAGE_VERSION,
     description=PACKAGE_DESC,
     long_description=readme(),
+    long_description_content_type='text/markdown',
     url='https://github.com/andruche/pgagent-yaml',
     project_urls={
         'Documentation': 'https://github.com/andruche/pgagent-yaml/blob/master/README.md',
