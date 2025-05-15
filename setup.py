@@ -8,7 +8,6 @@ from pgagent_yaml import __version__
 PACKAGE_TYPE = 'pg-tools'
 PACKAGE_NAME = 'pgagent-yaml'
 PACKAGE_DESC = 'Yaml interface for pgagent'
-PACKAGE_LONG_DESC = ''
 PACKAGE_VERSION = __version__
 
 
@@ -56,11 +55,17 @@ console_scripts = [
     'pgagent_yaml=pgagent_yaml.main:main'
 ]
 
+
+def readme():
+    with open('README.md', 'r') as f:
+        return f.read()
+
+
 setup(
     name=PACKAGE_NAME,
     version=PACKAGE_VERSION,
     description=PACKAGE_DESC,
-    long_description=PACKAGE_LONG_DESC,
+    long_description=readme(),
     url='https://github.com/andruche/pgagent-yaml',
     project_urls={
         'Documentation': 'https://github.com/andruche/pgagent-yaml/blob/master/README.md',
