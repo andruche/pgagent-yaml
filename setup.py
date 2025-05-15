@@ -61,9 +61,10 @@ setup(
     version=PACKAGE_VERSION,
     description=PACKAGE_DESC,
     long_description=PACKAGE_LONG_DESC,
-    url='https://gitlab.uis.dev/pg_tools/pgagent-yaml',
+    url='https://github.com/andruche/pgagent-yaml',
     project_urls={
-        'Documentation': 'https://gitlab.uis.dev/pg_tools/pgagent-yaml/blob/master/README.md'
+        'Documentation': 'https://github.com/andruche/pgagent-yaml/blob/master/README.md',
+        'Bug Tracker': 'https://github.com/andruche/pgagent-yaml/issues',
     },
     author="Andrey Chernyakov",
     license="BSD",
@@ -71,19 +72,19 @@ setup(
         'Development Status :: 5 - Production/Stable',
         'Environment :: Console',
         'Operating System :: OS Independent',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
     ],
     zip_safe=False,
     packages=find_packages(exclude=['tests', 'examples', '.reports']),
     entry_points={'console_scripts': console_scripts},
-    python_requires='>=3.6',
+    python_requires='>=3.9',
     setup_requires=setup_requires,
     install_requires=install_requires,
     tests_require=tests_require,
     cmdclass={'test': PyTest},
-    keywords='postgresql,git,ci/cd'
+    keywords='pgagent,git,yaml'
 )

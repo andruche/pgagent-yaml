@@ -1,6 +1,6 @@
 *.pyc
 .idea/*
 .DS_Store
-.ve/*
+.ve*/*
 venv/*
 *.egg*
