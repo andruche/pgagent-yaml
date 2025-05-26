@@ -1,6 +1,6 @@
 ## pgagent-yaml - Yaml interface for pgagent
 
-Export structure of pgagent jobs to yaml files
+Export structure of pgagent jobs to yaml files\
 Sync yaml files to pgagent jobs
 
 ## installation
