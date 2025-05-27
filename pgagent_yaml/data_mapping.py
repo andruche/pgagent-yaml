@@ -1,3 +1,4 @@
+from .models.schedule import Weekday
 from .pg import Pg
 
 
@@ -107,15 +108,7 @@ class PgToYamlMapping:
             if 'months' in columns:
                 return self.map_flags(value, range(1, 13))
             if 'weekdays' in columns:
-                return self.map_flags(value, [
-                    'sunday',
-                    'monday',
-                    'tuesday',
-                    'wednesday',
-                    'thursday',
-                    'friday',
-                    'saturday',
-                ])
+                return self.map_flags(value, Weekday.get_values())
         return value
 
     def map_table_row(self, table, row):
