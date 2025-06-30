@@ -22,7 +22,7 @@ class Synchronizer:
         self.formatter = Formatter()
         self.is_dir = os.path.isdir(self.args.source)
 
-    async def sync(self):
+    async def sync(self, show_diff_only=False):
         await self.map.load_job_classes()
         src_jobs = self.load_jobs()
         self.args.include_schedule_start_end = any(
@@ -40,6 +40,8 @@ class Synchronizer:
             print('Nothing to do: all jobs are up to date')
             return
         self.print_diff(diff)
+        if show_diff_only:
+            return
         if self.args.yes or self.confirm(len(diff)):
             await self.apply_changes(diff)
 

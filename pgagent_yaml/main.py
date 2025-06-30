@@ -17,10 +17,11 @@ async def run(args):
         await pg.init()
         await Extractor(args, pg).export()
 
-    elif args.command == 'sync':
+    elif args.command in ('diff', 'sync'):
         pg = Pg(args)
         await pg.init()
-        await Synchronizer(args, pg).sync()
+        synchronizer = Synchronizer(args, pg)
+        await synchronizer.sync(show_diff_only=args.command == 'diff')
 
     else:
         raise Exception(f'unknown command {args.command}')
@@ -38,6 +39,13 @@ def main():
                             type=str, help='database user name')
         parser.add_argument('-W', '--password',
                             type=str, help='database user password')
+
+    def add_ignore_version(parser):
+        parser.add_argument(
+            '--ignore-version',
+            action="store_true",
+            help='try exporting an unsupported server version'
+        )
 
     arg_parser = argparse.ArgumentParser(
         epilog='Report bugs: https://gitlab.uis.dev/pg_tools/pgagent-yaml/issues',
@@ -72,16 +80,25 @@ def main():
         help='clean out_dir if not empty '
         '(env variable PGAGENT_YAML_AUTOCLEAN=true)'
     )
-    parser_export.add_argument(
-        '--ignore-version',
-        action="store_true",
-        help='try exporting an unsupported server version'
-    )
+    add_ignore_version(parser_export)
     parser_export.add_argument(
         '--include-schedule-start-end',
         action="store_true",
         help='include "start", "end" fields (without by default)'
     )
+
+    parser_diff = subparsers.add_parser(
+        'diff',
+        help='show diff files and pgagent jobs',
+        conflict_handler='resolve',
+    )
+    add_connection_args(parser_diff)
+    parser_diff.add_argument(
+        '--source',
+        required=True,
+        help='directory or file with jobs to compare with pgagent'
+    )
+    add_ignore_version(parser_diff)
 
     parser_sync = subparsers.add_parser(
         'sync',
@@ -109,11 +126,7 @@ def main():
         action="store_true",
         help='do not ask confirm'
     )
-    parser_sync.add_argument(
-        '--ignore-version',
-        action="store_true",
-        help='try exporting an unsupported server version'
-    )
+    add_ignore_version(parser_sync)
 
     args = arg_parser.parse_args()
 
@@ -128,6 +141,10 @@ def main():
             os.makedirs(args.out_dir, exist_ok=True)
         except Exception:
             arg_parser.error("can not access to directory '%s'" % args.out_dir)
+
+    if args.command == 'diff':
+        if not os.path.exists(args.source):
+            parser_diff.error(f'file or directory not found: {args.source}')
 
     if args.command == 'sync':
         if not os.path.exists(args.source):
