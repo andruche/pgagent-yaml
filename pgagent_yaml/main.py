@@ -4,6 +4,7 @@ import asyncio
 import shutil
 
 from .extractor import Extractor
+from .runner import Runner
 from .synchronizer import Synchronizer
 from .pg import Pg
 from . import __version__
@@ -12,19 +13,17 @@ node_format = 'migration_path -> [user@]host:port/database'
 
 
 async def run(args):
+    pg = Pg(args)
+    await pg.init()
+
     if args.command == 'export':
-        pg = Pg(args)
-        await pg.init()
         await Extractor(args, pg).export()
 
     elif args.command in ('diff', 'sync'):
-        pg = Pg(args)
-        await pg.init()
-        synchronizer = Synchronizer(args, pg)
-        await synchronizer.sync(show_diff_only=args.command == 'diff')
+        await Synchronizer(args, pg).sync(show_diff_only=args.command == 'diff')
 
-    else:
-        raise Exception(f'unknown command {args.command}')
+    elif args.command in ('run_now'):
+        await Runner(args, pg).run_now()
 
 
 def main():
@@ -127,6 +126,19 @@ def main():
         help='do not ask confirm'
     )
     add_ignore_version(parser_sync)
+
+    parser_run_now = subparsers.add_parser(
+        'run_now',
+        help='sync files to pgagent jobs',
+        conflict_handler='resolve',
+    )
+    add_connection_args(parser_run_now)
+    parser_run_now.add_argument(
+        '--job',
+        required=True,
+        help='name of job to run'
+    )
+    add_ignore_version(parser_run_now)
 
     args = arg_parser.parse_args()
 

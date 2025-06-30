@@ -11,7 +11,7 @@ pip install pgagent-yaml
 
 ## usage
 
-### export jobs:
+### export jobs
 ```
 usage: pgagent_yaml export [--help] [-d DBNAME] [-h HOST] [-p PORT] [-U USER] [-W PASSWORD] --out-dir OUT_DIR [--clean]
                            [--ignore-version] [--include-schedule-start-end]
@@ -32,7 +32,25 @@ options:
                         include "start", "end" fields (without by default)
 ```
 
-### sync jobs:
+### print diff
+```
+usage: pgagent_yaml diff [--help] [-d DBNAME] [-h HOST] [-p PORT] [-U USER] [-W PASSWORD] --source SOURCE
+                         [--ignore-version]
+
+options:
+  --help                show this help message and exit
+  -d DBNAME, --dbname DBNAME
+                        database name to connect to
+  -h HOST, --host HOST  database server host or socket directory
+  -p PORT, --port PORT  database server port
+  -U USER, --user USER  database user name
+  -W PASSWORD, --password PASSWORD
+                        database user password
+  --source SOURCE       directory or file with jobs to compare with pgagent
+  --ignore-version      try exporting an unsupported server version
+```
+
+### sync jobs
 ```
 usage: pgagent_yaml sync [--help] [-d DBNAME] [-h HOST] [-p PORT] [-U USER] [-W PASSWORD] --source SOURCE [--dry-run]
                          [--echo-queries] [-y] [--ignore-version]
@@ -53,9 +71,29 @@ options:
   --ignore-version      try exporting an unsupported server version
 ```
 
+### run job now
+```
+usage: pgagent_yaml run_now [--help] [-d DBNAME] [-h HOST] [-p PORT] [-U USER] [-W PASSWORD] --job JOB
+                            [--ignore-version]
+
+options:
+  --help                show this help message and exit
+  -d DBNAME, --dbname DBNAME
+                        database name to connect to
+  -h HOST, --host HOST  database server host or socket directory
+  -p PORT, --port PORT  database server port
+  -U USER, --user USER  database user name
+  -W PASSWORD, --password PASSWORD
+                        database user password
+  --job JOB             name of job to run
+  --ignore-version      try exporting an unsupported server version
+```
 ## examples
 
 ```
 $ pgagent_yaml export -d my_database -h 127.0.0.1 -p 5432 -U postgres --out-dir /tmp/jobs/
+$ pgagent_yaml diff -d my_database -h 127.0.0.1 -p 5432 -U postgres --source /tmp/jobs/
 $ pgagent_yaml sync -d my_database -h 127.0.0.1 -p 5432 -U postgres --source /tmp/jobs/
+$ pgagent_yaml run_now -d my_database -h 127.0.0.1 -p 5432 -U postgres --job my_job
+
 ```

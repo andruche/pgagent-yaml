@@ -37,11 +37,11 @@ class Pg:
         await self.check_version()
         self.now = (await self.fetch('select now()'))[0]['now']
 
-    async def fetch(self, query: str, **params) -> list[dict]:
+    async def fetch(self, query: str, *params) -> list[dict]:
         rows = await self.con.fetch(query, *params)
         return [dict(row) for row in rows]
 
-    async def execute(self, query: str, **params) -> None:
+    async def execute(self, query: str, *params) -> None:
         await self.con.execute(query, *params)
 
     async def get_pgagent_version(self) -> tuple[int, int]:
