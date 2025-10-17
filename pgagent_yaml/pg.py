@@ -1,4 +1,6 @@
+import asyncio
 import datetime
+import signal
 import sys
 
 import asyncpg
@@ -38,11 +40,28 @@ class Pg:
         self.now = (await self.fetch('select now()'))[0]['now']
 
     async def fetch(self, query: str, *params) -> list[dict]:
-        rows = await self.con.fetch(query, *params)
-        return [dict(row) for row in rows]
+        query_task = asyncio.create_task(self.con.fetch(query, *params))
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGINT, query_task.cancel)
+        try:
+            rows = await query_task
+            return [dict(row) for row in rows]
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.5)
+            return []
+        finally:
+            loop.remove_signal_handler(signal.SIGINT)
 
     async def execute(self, query: str, *params) -> None:
-        await self.con.execute(query, *params)
+        query_task = asyncio.create_task(self.con.execute(query, *params))
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGINT, query_task.cancel)
+        try:
+            await query_task
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.5)
+        finally:
+            loop.remove_signal_handler(signal.SIGINT)
 
     async def get_pgagent_version(self) -> tuple[int, int]:
         ver = await self.fetch('''
