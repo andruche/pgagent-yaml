@@ -1,3 +1,5 @@
+from typing import Any
+
 import yaml
 
 
@@ -10,7 +12,7 @@ class Formatter:
         yaml.add_representer(str, str_presenter)
 
     @staticmethod
-    def dump(job: dict, file_name: str = None):
+    def dump(job: Any, file_name: str = None):
         if job is None:
             return ''
         file = None
@@ -22,4 +24,33 @@ class Formatter:
             allow_unicode=True,
             sort_keys=False,
             width=float('inf')
+        )
+
+    @staticmethod
+    def render_table(data):
+        def format_val(col, val, row_number, col_number):
+            if row_number == 0:  # header
+                res = str(val).center(col_width[col])
+            else:  # rows
+                res = str(val or '').ljust(col_width[col])
+            if col_number == len(row):  # last column
+                res = res.rstrip()
+            return res
+
+        if not data:
+            return ''
+
+        col_width = {}
+        header = {col: col for col in data[0]}
+        data = [header] + data
+        for row in data:
+            for col, val in row.items():
+                col_width[col] = max(col_width.get(col, 0), len(str(val or '')))
+
+        return '\n'.join(
+            ' | '.join(
+                format_val(col, val, row_number, col_number)
+                for col_number, (col, val) in enumerate(row.items(), 1)
+            )
+            for row_number, row in enumerate(data)
         )

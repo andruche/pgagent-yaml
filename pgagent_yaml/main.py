@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import argparse
 import asyncio
@@ -5,11 +6,25 @@ import shutil
 
 from .extractor import Extractor
 from .runner import Runner
+from .statistics import Statistics
 from .synchronizer import Synchronizer
 from .pg import Pg
 from . import __version__
 
 node_format = 'migration_path -> [user@]host:port/database'
+datetime_format = 'YYYY-MM-DD[ HH:MM:SS]'
+
+
+def validate_datetime(value):
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"Invalid date format: '{value}'. Use {datetime_format}"
+            )
 
 
 async def run(args):
@@ -22,8 +37,11 @@ async def run(args):
     elif args.command in ('diff', 'sync'):
         await Synchronizer(args, pg).sync(show_diff_only=args.command == 'diff')
 
-    elif args.command in ('run_now'):
+    elif args.command == 'run_now':
         await Runner(args, pg).run_now()
+
+    elif args.command == 'stat':
+        await Statistics(args, pg).print_stat()
 
 
 def main():
@@ -43,11 +61,11 @@ def main():
         parser.add_argument(
             '--ignore-version',
             action="store_true",
-            help='try exporting an unsupported server version'
+            help='try to execute the command anyway'
         )
 
     arg_parser = argparse.ArgumentParser(
-        epilog='Report bugs: https://gitlab.uis.dev/pg_tools/pgagent-yaml/issues',
+        epilog='Report bugs: https://github.com/andruche/pgagent-yaml/issues',
         conflict_handler='resolve',
     )
 
@@ -136,9 +154,57 @@ def main():
     parser_run_now.add_argument(
         '--job',
         required=True,
+        metavar='JOB_NAME',
         help='name of job to run'
     )
     add_ignore_version(parser_run_now)
+
+    parser_stat = subparsers.add_parser(
+        'stat',
+        help='show run statistics',
+        conflict_handler='resolve',
+    )
+    add_connection_args(parser_stat)
+    parser_stat.add_argument(
+        '--job',
+        required=True,
+        metavar='JOB_NAME',
+    )
+    parser_stat.add_argument(
+        '--step',
+        required=False,
+        metavar='STEP_NAME',
+    )
+    parser_stat.add_argument(
+        '--start',
+        required=False,
+        metavar='TIMESTAMP',
+        type=validate_datetime,
+        help=datetime_format,
+    )
+    parser_stat.add_argument(
+        '--till',
+        required=False,
+        metavar='TIMESTAMP',
+        type=validate_datetime,
+        help=datetime_format,
+    )
+    parser_stat.add_argument(
+        '--limit',
+        required=False,
+        metavar='ROWS',
+        default=50,
+        type=int,
+        help='(default: %(default)s)'
+    )
+    parser_stat.add_argument(
+        '--format',
+        required=False,
+        default='text',
+        choices=['text', 'yaml'],
+        help='(default: %(default)s)'
+    )
+    add_ignore_version(parser_stat)
 
     args = arg_parser.parse_args()
 

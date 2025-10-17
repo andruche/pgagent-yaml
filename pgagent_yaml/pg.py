@@ -90,3 +90,26 @@ class Pg:
                 file=sys.stderr
             )
             exit(1)
+
+    async def get_job_id_by_name(self, name):
+        job = await self.fetch('''
+            select j.jobid
+              from pgagent.pga_job j 
+             where j.jobname = $1;
+        ''', name)
+        if not job:
+            raise Exception(f'job "{name}" not found')
+        return job[0]['jobid']
+
+    async def get_step_id_by_name(self, job_name, step_name):
+        step = await self.fetch('''
+            select s.jstid
+              from pgagent.pga_jobstep s
+              inner join pgagent.pga_job j
+                      on j.jobid = s.jstjobid
+             where j.jobname = $1 and
+                   s.jstname = $2;
+        ''', job_name, step_name)
+        if not step:
+            raise Exception(f'job step "{job_name}/{step_name}" not found')
+        return step[0]['jstid']
