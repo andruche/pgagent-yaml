@@ -42,7 +42,8 @@ class Pg:
     async def fetch(self, query: str, *params) -> list[dict]:
         query_task = asyncio.create_task(self.con.fetch(query, *params))
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, query_task.cancel)
+        if sys.platform != 'win32':
+            loop.add_signal_handler(signal.SIGINT, query_task.cancel)
         try:
             rows = await query_task
             return [dict(row) for row in rows]
@@ -50,18 +51,21 @@ class Pg:
             await asyncio.sleep(0.5)
             return []
         finally:
-            loop.remove_signal_handler(signal.SIGINT)
+            if sys.platform != 'win32':
+                loop.remove_signal_handler(signal.SIGINT)
 
     async def execute(self, query: str, *params) -> None:
         query_task = asyncio.create_task(self.con.execute(query, *params))
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, query_task.cancel)
+        if sys.platform != 'win32':
+            loop.add_signal_handler(signal.SIGINT, query_task.cancel)
         try:
             await query_task
         except asyncio.CancelledError:
             await asyncio.sleep(0.5)
         finally:
-            loop.remove_signal_handler(signal.SIGINT)
+            if sys.platform != 'win32':
+                loop.remove_signal_handler(signal.SIGINT)
 
     async def get_pgagent_version(self) -> tuple[int, int]:
         ver = await self.fetch('''
